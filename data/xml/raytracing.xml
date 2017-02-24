@@ -1,0 +1,27 @@
+<raytracing>
+    <direct enable="true">
+        <!--
+        Valeurs possibles -- exercice associé :
+        NPointPerSource   -- exo 5
+        OnePointPerSource -- exo 4
+        NFibonacci        -- exo 5
+        NGridTriangle     -- exo 5
+        NRandomSource     -- exo 6
+        
+        -->
+        <enumMethod>NGridTriangle</enumMethod>
+        <N>64</N>
+        <normalTweak_f>0.1</normalTweak_f>
+    </direct>
+    <indirect enable="false">
+        <!--
+        Valeurs possibles :
+        
+        -->
+        <enumMethod>rien</enumMethod>
+        <N>64</N>
+    </indirect>
+    <emited enable="true" />
+    <phongInterpolation>0.7</phongInterpolation> <!-- compris entre 0.0 et 1.0 -->
+    <randomSeed time="false">25</randomSeed>
+</raytracing>

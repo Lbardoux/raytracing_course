@@ -1,0 +1,5 @@
+<scene>
+	<!-- Tout doit se faire depuis la racine du projet -->
+	<obj>data/obj/cornell.obj</obj>
+	<orbiter>data/orbiters/cornell_face.txt</orbiter> 
+</scene>

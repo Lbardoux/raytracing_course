@@ -1,0 +1,491 @@
+#include "app_core.hpp"
+#include "math_core.hpp"
+
+#include <string>
+#include <sstream>
+#include <vector>
+#include <algorithm>
+
+#include "Hit.hpp"
+#include "Triangle.hpp"
+#include "tonemapper.hpp"
+#include "XMLLoader/XmlLoader.hpp"
+#include "BinaryTree.hpp"
+
+// ensemble de sources de lumieres
+std::vector<Source> sources;
+
+// recuperer les sources de lumiere du mesh : triangles associee a une matiere qui emet de la lumiere, material.emission != 0
+int build_sources( const Mesh& mesh )
+{
+    for(int i= 0; i < mesh.triangle_count(); i++)
+    {
+        // recupere la matiere associee a chaque triangle de l'objet
+        Material material= mesh.triangle_material(i);
+
+        if((material.emission.r + material.emission.g + material.emission.b) > 0)
+            // inserer la source de lumiere dans l'ensemble.
+            sources.push_back( Source(mesh.triangle(i), material.emission) );
+    }
+
+    printf("%d sources.\n", (int) sources.size());
+    return (int) sources.size();
+}
+
+// verifie que le rayon touche une source de lumiere.
+bool direct( const Ray& ray )
+{
+    for(size_t i= 0; i < sources.size(); i++)
+    {
+        float t, u, v;
+        if(sources[i].intersect(ray, ray.tmax, t, u, v))
+            return true;
+    }
+    
+    return false;
+}
+
+
+// ensemble de triangles
+std::vector<Triangle> triangles;
+
+// recuperer les triangles du mesh
+int build_triangles( const Mesh &mesh )
+{
+    for(int i= 0; i < mesh.triangle_count(); i++)
+        triangles.push_back( Triangle(mesh.triangle(i)) );
+    
+    printf("%d triangles.\n", (int) triangles.size());
+    return (int) triangles.size();
+}
+
+
+// calcule l'intersection d'un rayon et de tous les triangles
+bool intersect( const Ray& ray, Hit& hit )
+{
+    hit.t= ray.tmax;
+    for(size_t i= 0; i < triangles.size(); i++)
+    {
+        float t, u, v;
+        if(triangles[i].intersect(ray, hit.t, t, u, v))
+        {
+            hit.t= t;
+            hit.u= u;
+            hit.v= v;
+            
+            hit.p= ray(t);      // evalue la positon du point d'intersection sur le rayon
+            hit.n= triangles[i].normal(u, v);
+            
+            hit.object_id= i;	// permet de retrouver toutes les infos associees au triangle
+        }
+    }
+    
+    return (hit.object_id != -1);
+}
+
+// construit un repere ortho tbn, a partir d'un seul vecteur...
+// cf "generating a consistently oriented tangent space" 
+// http://people.compute.dtu.dk/jerf/papers/abstracts/onb.html
+struct World
+{
+    World( const Vector& _n ) : n(_n) 
+    {
+        if(n.z < -0.9999999f)
+        {
+            t= Vector(0, -1, 0);
+            b= Vector(-1, 0, 0);
+        }
+        else
+        {
+            float a= 1.f / (1.f + n.z);
+            float d= -n.x * n.y * a;
+            t= Vector(1.f - n.x * n.x * a, d, -n.x);
+            b= Vector(d, 1.f - n.y * n.y * a, -n.y);
+        }
+    }
+    
+    Vector operator( ) ( const Vector& local )  const
+    {
+        return local.x * t + local.y * b + local.z * n;
+    }
+    
+    Vector t;
+    Vector b;
+    Vector n;
+};
+
+
+
+// objets
+Mesh mesh;
+Orbiter camera;
+Point light;
+
+namespace TP_rendu
+{
+    float coef = 0.0f;
+    /**
+     * @brief Lit le fichier de configuration, cela permet de ne pas recompiler à chaque fois pour changer de simples paramètres.
+     * @param[out] fov        L'ouverture                que l'on va lire dans le fichier.
+     * @param[out] width      La longueur de l'image     que l'on va lire dans le fichier.
+     * @param[out] height     La hauteur  de l'image     que l'on va lire dans le fichier.
+     * @param[out] outputname Le nom de l'image résultat que l'on va lire dans le fichier.
+     * @return 1 si une erreur a eu lieu, 0 sinon.
+     */
+    int parseConfig(float& fov, int& width, int& height, std::string& outputname, int& N)
+    {
+        XmlLoader loader("data/config.xml");
+        mesh = read_mesh(loader.element("sceneObj").text<std::string>().c_str());
+        if(mesh == Mesh::error())
+        {
+            return 1;
+        }
+        camera.read_orbiter(loader.element("orbiter").text<std::string>().c_str());
+        fov    = loader.element("fov").text<float>();
+        width  = loader.node("image").element("width").text<int>();
+        height = loader.element("height").text<int>();
+        loader.prev();
+        if (loader.element("seed").attribute<bool>("with_time"))
+        {
+            srand48(time(NULL));
+        }
+        else
+        {
+            srand48(loader.text<int>());
+        }
+        
+        coef = loader.node("blinn").element("coef").text<float>();
+        loader.prev().node("light");
+        light.x = loader.element("x").text<float>();
+        light.y = loader.element("y").text<float>();
+        light.z = loader.element("z").text<float>();
+        N = loader.prev().element("N").text<int>();
+        
+        // Construit un nom de fichier en fonction des paramètres.
+        outputname = loader.element("output").text<std::string>();
+        std::stringstream buf;
+        buf << "N" << N << ".png";
+        outputname += buf.str();
+        
+        return 0;
+    }
+    /**
+     * @struct BlinnPhongWrapper
+     * @brief Embarque les arguments pour faire un calcul avec blinn phong.
+     */
+    struct BlinnPhongWrapper final
+    {
+        const Hit*   hit;      //!< Le point d'impact trouvé, P.
+        const Mesh*  mesh;     //!< Le mesh qui contient le triangle concerné.
+        const Point* observer; //!< La position de l'observeur.
+        const Point* src;      //!< La source de lumière avec laquelle tester.
+    };
+    /**
+     * @brief Applique un éclairage de type Blinn Phong
+     * @param[in] wrap L'ensemble des arguments pour effectuer ce calcul.
+     * @return La couleur obtenu.
+     */
+    Color BlinnPhong(const BlinnPhongWrapper& wrap) noexcept
+    {
+        const Material& material  = wrap.mesh->triangle_material(wrap.hit->object_id);
+        Vector          PO        = normalize(Vector(wrap.hit->p, *wrap.observer));
+        Vector          PS        = normalize(Vector(wrap.hit->p, *wrap.src));
+        Vector          H         = normalize((PO + PS)/2.0f);
+        float           cosTheta  = std::max(0.0f, dot(wrap.hit->n, PS));
+        float           cosThetaH = std::max(0.0f, dot(wrap.hit->n, H));
+        float           f         = ((material.ns + 1.0f)/(2.0f*M_PI))*std::pow(cosThetaH, material.ns);
+        
+        return (1.0f-TP_rendu::coef)*material.specular*cosTheta*f + (TP_rendu::coef)*cosTheta*material.diffuse;
+    }
+    double randRange(int min, int max)
+    {
+        return min + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(max - min)));
+    }
+    /**
+     * @brief      Génère un nombre de direction à partir d'un point dont on connait sa normale
+     * @param[in]  h     Point à partir duquel on va générer les directions
+     * @param[in]  nb    Le nombre de directions à générer
+     * @return     Tableaux de rayons de tailles nb
+     */
+    std::vector<Ray> genereDirectionAleatoires(const Hit& h, int nb)
+    {
+        std::vector<Ray> res;
+        Vector tpmp;
+    
+        World w(h.n);
+        float theta, phi;
+        float cosPhi;
+        res.reserve(nb);
+        for (int i = 0; i < nb; ++i)
+        {
+            theta = randRange(-90, 90);
+            phi   = randRange(-90, 90);
+            cosPhi = cos(phi);
+            tpmp.x = cosPhi * cos(theta);
+            tpmp.y = cosPhi * sin(theta);
+            tpmp.z = sin(phi);
+            res.push_back(Ray(h.p, w(tpmp)));
+        }
+        return res;
+    }
+    std::vector<Ray> genereDirectionFibonacci(const Hit& h, int nb)
+    {
+        std::vector<Ray> res;
+        Vector tpmp;
+    
+        const float PHI = (sqrt(5) + 1) / 2;
+        int denominateur = 2 * nb;
+        float cosTheta, phi, sinTheta;
+        float ptrTmp;
+    
+        for (int i = 0; i < nb; ++i)
+        {
+            cosTheta = 1 - ((2 * i) + 1 / denominateur);
+            sinTheta = sqrt(1 - (cosTheta * cosTheta));
+    
+            phi = (2 * M_PI) * modff(i / PHI, &ptrTmp);
+    
+            tpmp.x = cos(phi) * sinTheta;
+            tpmp.y = sin(phi) * sinTheta;
+            tpmp.z = cosTheta;
+            
+            
+            res.push_back(Ray(h.p, tpmp));
+        }
+        return res;
+    }
+    /**
+     * @brief Teste si on peut générer un rayon depuis \b hit et atteindre \b source.
+     * @param[in]  hit    Le point d'impact préalablement obtenu.
+     * @param[in]  source La source de lumière avec laquelle tester.
+     * @param[out] ouput  Là où seront stocker les résultats.
+     * @return true si on peut atteindre \b source, false sinon.
+     */
+	bool reachLightSource(const Hit& hit, const Point& source, Hit& output) noexcept
+	{
+		Point o = hit.p + hit.n*0.01;
+		Point e = source;
+		Ray ray(o, e);
+		bool result = !intersect(ray, output);
+		if (result == true)
+		{
+			// todo : à completer
+			output.p = e;
+			/*output.n = ;
+			output.t = ;
+			output.u = ;
+			output.v = ;*/
+			output.object_id = -1;
+		}
+		return result; 
+	}
+	bool reachLightSourcesWithOnePoint(const Hit& hit, std::vector<Hit>& hits) noexcept
+	{
+		hits.clear();
+		for(auto source : sources)
+		{
+			Hit withLight;
+			Point toTest = source.getRandomPoint();
+			toTest = toTest + source.normal(0.33, 0.33)*0.01;
+			bool reach  = reachLightSource(hit, toTest, withLight);
+			if (reach == true)
+			{
+				hits.push_back(withLight);
+			}
+		}
+		return !hits.empty();
+	}
+
+	/**
+	 * @brief Teste, pour toutes les sources, si \b hit atteint un point tiré au hasard sur les sources.
+	 * @param[in]  hit      Le point d'impact du rayon sur la scène.
+	 * @return true si on a pu atteindre une source de lumière, false sinon.
+	 */
+	bool reachAnyLightWithOnePoint(const Hit& hit, Hit& output) noexcept
+	{
+		bool reach = false;
+		for(auto source : sources)
+		{
+			Point toTest = source.getRandomPoint();
+			toTest = toTest + source.normal(0.33, 0.33)*0.01;
+			reach  = reachLightSource(hit, toTest, output);
+			if (reach == true)
+			{
+				break;
+			}
+		}
+		return reach;
+	}
+	/**
+	 * @brief Génère \b N points aléatoires pour la source \b src et range le résultat dans \b points.
+	 * @param[in]  src    La source de lumière à traiter.
+	 * @param[in]  N      Le nombre de points que l'on veut.
+	 * @param[out] points Le conteneur pour le résultat.
+	 * @return Une référence sur \b points.
+	 */
+	std::vector<Point>& generateNPoints(const Source& src, int N, std::vector<Point>& points)
+	{
+		points.clear();
+		while (N-- > 0)
+		{
+			points.push_back(src.getRandomPoint());
+		}
+		return points;
+	}
+	/**
+	 * @brief reachAnyLightWithNPoints
+	 * @param[in]  hit    Le point d'impact du rayon initial depuis la caméra.
+	 * @param[out] output Le conteneur pour le résultat (couleur, etc).
+	 * @param[in]  N      Le nombre 
+	 * @return 
+	 */
+	bool reachAnyLightWithNPoints(const Hit& hit, Hit& output, int N) noexcept
+	{
+		std::vector<Point> points;
+		for(auto src : sources)
+		{
+			for(auto pt : generateNPoints(src, N, points))
+			{
+				if (reachLightSource(hit, pt, output) == true)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	
+	struct Hitpoint
+	{
+		int src_index;
+		Hit hit;
+	};
+	
+	bool reachLightsWithNPoints(const Hit& hitp, std::vector<Hitpoint>& outputs, int N) noexcept
+	{
+		bool reach = false;
+		std::vector<Point> points;
+		int i = 0;
+		for(auto src : sources)
+		{
+			for(auto pt : generateNPoints(src, N, points))
+			{
+				Hit tmp;
+				if (reachLightSource(hitp, pt, tmp) == true)
+				{
+					reach = true;
+					Hitpoint hp = {i, tmp};
+					outputs.push_back(hp);
+				}
+			}
+			++i;
+		}
+		return reach;
+	}
+	
+	
+	/**
+	 * @brief Vérifie si depuis le point \b hit trouvé sur la scène, on peut, en utilisant les rayons contenus dans \b rays,
+	 * atteindre une source de lumière.
+	 * @param[in]  hit    Le point sur la scène.  
+	 * @param[out] output Le point de lumière trouvé.
+	 * @param[in]  rays   Les rayons que l'on va tester.
+	 * @return true si on a trouvé une source, false sinon.
+	 */
+	bool reachAnyLightWithRays(const Hit& hit, Hit& output, const std::vector<Ray>& rays)
+	{
+		const float TMAX = 100.0f;
+		for(auto ray : rays)
+		{
+			for(auto source : sources)
+			{
+				if (source.intersect(ray, TMAX, output.t, output.u, output.v))
+				{
+					output.p = ray(output.t);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	/**
+	 * @brief Tire N points au hasard sur les sources disponibles .
+	 * @param[in] N Le nombre de points que l'on veut.
+	 * @return Le conteneur qui va stocker les points.
+	 */
+	std::vector<Point> getNRandomPoints(int N)
+	{
+		std::vector<Point> pts;
+		pts.reserve(N);
+		while(N-- > 0)
+		{
+			int whichSource = rand()%(sources.size());
+			pts.push_back(sources.at(whichSource).getRandomPoint());
+		}
+		return pts;
+	}
+}
+
+
+
+int main(int argc, char** argv)
+{
+    float fov;
+    int width, height, N;
+    std::string output;
+    if (TP_rendu::parseConfig(fov, width, height, output, N))
+    {
+        return EXIT_FAILURE;
+    }
+    
+    build_sources(mesh); 
+    build_triangles(mesh);
+    Image image(width, height);
+    
+    // Calcul du point de départ des rayons.
+    Point d0;
+    Vector dx0, dy0;
+    camera.frame(image.width(), image.height(), 1, fov, d0, dx0, dy0);
+    Point o = camera.position();
+    
+    
+	#pragma omp parallel for schedule(dynamic, 16) firstprivate(mesh, light, o, d0, dx0, dy0)
+    for(int y = 0; y < image.height(); y++)
+    {
+        for(int x = 0; x < image.width(); x++)
+        {
+            Point e = d0 + x*dx0 + y*dy0;
+            Ray ray(o, e); // Inverser celui-ci = virer les cubes
+            Hit hit;
+            if(intersect(ray, hit))
+            {
+				Hit withLight;
+				Color direct;
+				Color emited = mesh.triangle_material(hit.object_id).emission;
+				
+				if (TP_rendu::reachAnyLightWithNPoints(hit, withLight, N))
+				//if (TP_rendu::reachAnyLightWithOnePoint(hit, withLight))
+				//if (TP_rendu::reachLightSource(hit, sources.at(0).getRandomPoint(), withLight))
+				{
+					TP_rendu::BlinnPhongWrapper wrapper = {&hit, &mesh, &o, &withLight.p}; 
+	                direct = TP_rendu::BlinnPhong(wrapper);
+				}
+				else
+				{
+					direct = Black();
+				}
+                
+                // calculer l'eclairage indirect
+                //Color indirect= { ... };
+                image(x, y) = Color(emited + direct, 1.0f);
+            }
+            else
+            {
+                image(x, y) = Color(Black(), 1.0f);
+            }
+        }
+    }
+    std::cout << "Sauvegarde de " << output << std::endl;
+    write_image(image, output.c_str());
+    return 0;
+}

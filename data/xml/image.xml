@@ -1,0 +1,10 @@
+<image>
+	<width>640</width>
+	<height>640</height>
+	<fov>45.0</fov>
+	<!--
+	Depuis la racine du projet.
+	L'application écrira alors le type de direct, le type d'indirect, le nombre N et .png
+	-->
+	<output>data/renders/</output>
+</image>
