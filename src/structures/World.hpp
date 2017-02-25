@@ -8,7 +8,7 @@
 #ifndef WORLD_HPP_INCLUDED
 #define WORLD_HPP_INCLUDED
 
-#include "gkit_core.hpp"
+#include "../core/gkit_core.hpp"
 
 // construit un repere ortho tbn, a partir d'un seul vecteur...
 // cf "generating a consistently oriented tangent space" 

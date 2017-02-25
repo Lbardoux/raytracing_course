@@ -4,15 +4,19 @@
 #include <algorithm>
 #include <functional>
 #include <random>
+#include <array>
 
 #include "Direct.hpp"
 #include "BlinnPhong.hpp"
 #include "ConfigLoaders.hpp"
 #include "core/math_core.hpp"
 #include "core/gkit_core.hpp"
+#include "structures/World.hpp"
+#include "pdf.hpp"
 
 namespace
 {
+    typedef std::array<float, 3> FromG_t;
     /**
      * @brief Calcule la valeur de G pour <b>(P, nP)</b> le point d'impact du rayon et la soruce <b>(S, nS)</b>.
      * @param[in] P         La position dans le monde du point d'impact.
@@ -20,12 +24,15 @@ namespace
      * @param[in] S         La position du point de la source dans le monde.
      * @param[in] nS        La normale en ce point de la source dans le monde.
      * @param[in] costhetaP La valeur précalculé de cos(Op).
-     * @return La valeur de G, résultat du calcul.
+     * @return Les valeurs de G, résultantes du calcul.
      */
-    float computeG(const Point& P, const Vector& nP, const Point& S, const Vector& nS, float costhetaP) noexcept
+    FromG_t computeG(const Point& P, const Vector& nP, const Point& S, const Vector& nS, float costhetaP) noexcept
     {
-        float costhetaS = std::cos(dot(normalize(Vector(S, P)), normalize(nS)));
-        return (costhetaP*costhetaS) / distance2(P, S);
+        FromG_t result;
+        result.at(1) = std::cos(dot(normalize(Vector(S, P)), normalize(nS)));
+        result.at(2) = distance2(P, S);
+        result.at(0) = (costhetaP*result.at(1)) / result.at(2);
+        return result;
     }
     /**
      * @brief Calcule le pas lorsque l'on veut N points sur une source, tel que le pas décompose l'interval [0, 1].
@@ -48,7 +55,58 @@ namespace
     {
         return point + normal*RaytracingXml::normalTweak;
     }
-    
+    /**
+     * @brief Calcule le point d'arrivée du rayon, et la normale en ce point.
+     * @param(in]  src    La source depuis laquelle travailler.
+     * @param[in]  alpha  Le premier décalage sur les coordonnés barycentrique.
+     * @param[in]  beta   Le second  décalage sur les coordonnés barycentrique.
+     * @param[out] normal La normale au point calculé, en résultat.
+     * @return Le point d'arrivée obtenu.
+     */
+    Point sourceShifting(const Source& src, float alpha, float beta, Vector& normal) noexcept
+    {
+        normal = src.normal(alpha, beta);
+        return shift(src.point(alpha, beta), normal);
+    }
+    /**
+     * @brief Tire un point sur @b src en se basant sur @b u et @b v.
+     * @details Cela va également remplir la normale de ce point.
+     * @param[in]  src    La source sur laquelle on veut prélever un point.
+     * @param[in]  u      La première coordonné barycentrique.
+     * @param[in]  v      La seconde  coordonné barycentrique.
+     * @param[out] normal La normale que l'on va calculé pour le point obtenu.
+     * @return Le point obtenu sur la source, décalé par rapport à la normale.
+     * @pre @b u est compris entre 0.0f et 1.0f.
+     * @pre @b v est compris entre 0.0f et 1.0f.
+     */
+    Point pointOnSource(const Source& src, const float u, const float v, Vector& normal) noexcept
+    {
+        const float sqrt_u = std::sqrt(u);
+        const float beta   = v*sqrt_u;
+        const float alpha  = sqrt_u - beta; // Gaffe ici 
+        return sourceShifting(src, alpha, beta, normal);
+    }
+    /**
+     * @brief Applique la formule de l'éclairage directe.
+     * @param[in]  impact    Le hit du point vu par l'observateur.
+     * @param[in]  observer  La position de l'observeur.
+     * @param[in]  o         Le point d'origine du rayon allant vers la source.
+     * @param[in]  e         Le point sur la source pour le rayon.
+     * @param[in]  normal    La normal à la source.
+     * @param[out] fromG     Un conteneur pour les calculs de G.
+     * @param[out] cosThetaP Récupère ce cosTheta pour la suite.
+     * @return La couleur calculé pour cette étape.
+     */
+    Color computeL1(const Hit& impact, const Point& observer, const Point& o, const Point& e,
+                    const Vector& normal, FromG_t& fromG, float& cosThetaP) noexcept
+    {
+        BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
+        Color brdf             = BlinnPhong(wrap, RaytracingXml::interpolation);
+        cosThetaP              = std::cos(dot(normalize(Vector(o, e)), normalize(normal)));
+        fromG                  = computeG(o, impact.n, e, normal, cosThetaP);
+        return fromG.at(0)*brdf*cosThetaP;
+    }
+
     /**
      * @brief Effectue un calcul de luminosité directe "générique".
      * @param[in] observer     La position de l'observateur.
@@ -71,18 +129,22 @@ namespace
                 Ray ray(o, e);
                 if (!Scene::intersect(ray, hit))
                 {
-                    BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
-                    Color brdf     = BlinnPhong(wrap, RaytracingXml::interpolation);
-                    float cosThetaP = std::cos(dot(normalize(Vector(o, e)), normalize(normal)));
-                    float G = computeG(o, impact.n, e, normal, cosThetaP);
-                    result = result + (G*brdf*cosThetaP);
+                    FromG_t foo1;
+                    float foo2;
+                    result = result + computeL1(impact, observer, o, e, normal, foo1, foo2);
                 }
             }
         });
         
         return result/static_cast<float>(Scene::sources.size()*N);
     }
-    
+    /**
+     * @brief Méthode directe basée sur un maillage des sources.
+     * @param[in] observer La position de l'observateur.
+     * @param[in] impact   Le point d'impact du rayon.
+     * @param[in] N        Le nombre de points/d'itérations voulu(e)s.
+     * @return La couleur obtenue via l'&quation qui fait peur.
+     */
     Color gridDirect(const Point& observer, const Hit& impact, int N)
     {
         Color result;
@@ -95,23 +157,19 @@ namespace
             {
                 for(int jv=0;jv<=N;++jv)
                 {
-                    float u = static_cast<float>(iu)*step;
-                    float v = static_cast<float>(jv)*step;
+                    const float u = static_cast<float>(iu)*step;
+                    const float v = static_cast<float>(jv)*step;
                     if (u+v <= 1.0f)
                     {
-                        float sqrtu   = std::sqrt(u);
-                        float alpha   = (1.0f - v)*sqrtu;
-                        float beta    = v*sqrtu;
-                        Vector normal = src.normal(alpha, beta);
-                        Point  e      = shift(src.point(alpha, beta), normal);
+                        Vector normal;
+                        Point  e = pointOnSource(src, u, v, normal);
                         Ray ray(o, e);
                         if (!Scene::intersect(ray, hit))
                         {
-                            BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
-                            Color brdf     = BlinnPhong(wrap, RaytracingXml::interpolation);
-                            float cosThetaP = std::cos(dot(normalize(Vector(o, e)), normalize(normal)));
-                            float G = computeG(o, impact.n, e, normal, cosThetaP);
-                            result = result + (G*brdf*cosThetaP);
+                            FromG_t G;
+                            float cosThetaP;
+                            result = result + computeL1(impact, observer, o, e, normal, G, cosThetaP);
+                            
                         }
                         ++nbPoint;
                     }
@@ -128,22 +186,17 @@ Color OnePointPerSource::compute(const Point& observer, const Hit& impact, int N
 {
     (void)N;
     return basicDirect(observer, impact, 1, [](Source& src, Vector& n){
-        n = src.normal(0.33f, 0.33f);
-        return shift(src.point(0.33f, 0.33f), n);
+        return sourceShifting(src, 0.33f, 0.33f, n);
     });
 }
 
 Color NPointPerSource::compute(const Point& observer, const Hit& impact, int N)
 {
-    // The new cool in age way to generate randoms
     std::random_device rd;
     std::mt19937       mt(rd());
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     return basicDirect(observer, impact, N, [&mt, &dist](Source& src, Vector& n){
-        float dx = dist(mt);
-        float dy = dist(mt);
-        n = src.normal(dx, dy);
-        return shift(src.point(dx, dy), n);
+        return pointOnSource(src, dist(mt), dist(mt), n);
     });
 }
 
@@ -161,13 +214,15 @@ Color FibonacciSpiral::compute(const Point& observer, const Hit& impact, int N)
     
     // On va construire une spirale pour définir des points sur chaque source.
     std::for_each(Scene::sources.begin(), Scene::sources.end(), [&](Source& src){
+        World world(src.normal(0.33f, 0.33f));
         for(int i=0;i<N;++i)
         {
             float cosTheta = 1.0f - ((2.0f*i + 1)/(2.0f*N));
             float theta2   = 2.0f*M_PI*((i+u)/phi - std::floor((i+u)/phi));
             float sinTheta = std::sqrt(1.0f - cosTheta*cosTheta);
             Point e(std::cos(theta2)*sinTheta, std::sin(theta2)*sinTheta, cosTheta);
-            Ray ray(o, e);
+            Vector direction(world(Vector(o, e)));
+            Ray ray(o, direction);
             if (!Scene::intersect(ray, hit))
             {
                 BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
@@ -180,26 +235,14 @@ Color FibonacciSpiral::compute(const Point& observer, const Hit& impact, int N)
 
 Color TriangleGrid::compute(const Point& observer, const Hit& impact, int N)
 {
-    /*std::random_device rd;
-    std::mt19937       mt(rd());
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    return basicDirect(observer, impact, N, [&mt, &dist](Source& src, Vector& n){
-        float sqrtu1 = std::sqrt(dist(mt));
-        float u2 = dist(mt);
-        float x = (1.0f - u2)*sqrtu1;
-        float y = u2*sqrtu1;
-        n = src.normal(x, y);
-        return shift(src.point(x, y), n);
-    });*/
     return gridDirect(observer, impact, N);
 }
 
 Color RandomSource::compute(const Point& observer, const Hit& impact, int N)
 {
     Color result;
-    bool useDistance = true;
     Hit hit;
-    Point o = impact.p + impact.n*0.05;
+    Point o = shift(impact.p, impact.n);
     std::random_device rd;
     std::mt19937       mt(rd());
     std::uniform_int_distribution<int>    dist(0, Scene::sources.size()-1);
@@ -207,34 +250,39 @@ Color RandomSource::compute(const Point& observer, const Hit& impact, int N)
     for(int i=0;i<N;++i)
     {
         Source& src = Scene::sources.at(dist(mt));
-        Point e = src.point(distreal(mt), distreal(mt));
+        /*const float x = distreal(mt);
+        const float y = distreal(mt);
+        const float sqrtu   = std::sqrt(x);
+        const float alpha   = (1.0f - y)*sqrtu;
+        const float beta    = y*sqrtu;*/
+        Vector normal;// = src.normal(alpha, beta);
+        //Point e = shift(src.point(alpha, beta), normal);
+        Point e = pointOnSource(src, distreal(mt), distreal(mt), normal);
         Ray ray(o, e);
         if (!Scene::intersect(ray, hit))
         {
-            BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
-            float Gps = 1.0f;
-            if (useDistance)
-            {
-                Vector PO = normalize(Vector(impact.p, observer));
-                Vector PS = normalize(Vector(impact.p, e));
-                float cosTheta  = std::abs(dot(impact.n, PS));
-                float cosThetas = std::abs(dot(impact.n, normalize((PO + PS)/2.0f)));
-                Gps = (cosTheta*cosThetas)/distance2(o, e);
-            }
-            result = result + BlinnPhong(wrap, RaytracingXml::interpolation)*Gps;
+            FromG_t G;
+            float cosThetaP;
+            result = result + computeL1(impact, observer, o, e, normal, G, cosThetaP);
+            /*BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
+            Color brdf     = BlinnPhong(wrap, RaytracingXml::interpolation);
+            float cosThetaP = std::cos(dot(normalize(Vector(o, e)), normalize(normal)));
+            FromG_t G = computeG(o, impact.n, e, normal, cosThetaP);
+            result = result + (G.at(0)*brdf*cosThetaP);*/
         }
     }
-    return result;
+    return result/static_cast<float>(N);
 }
 
+#define DIRECT_RECIPE(str, classname) str ,  [](void) -> Direct* {return new classname();}
 DirectFactory::DirectFactory(void) : Factory<std::string, Direct*>()
 {
     this->addRecipes(
-        "NPointPerSource" ,  [](void) -> Direct* {return new NPointPerSource();},
-        "OnePointPerSource", [](void) -> Direct* {return new OnePointPerSource();},
-        "NFibonacci",        [](void) -> Direct* {return new FibonacciSpiral();},
-        "NGridTriangle",     [](void) -> Direct* {return new TriangleGrid();},
-        "NRandomSource",     [](void) -> Direct* {return new RandomSource();}
+        DIRECT_RECIPE("NPointPerSource",   NPointPerSource),
+        DIRECT_RECIPE("OnePointPerSource", OnePointPerSource),
+        DIRECT_RECIPE("NFibonacci",        FibonacciSpiral),
+        DIRECT_RECIPE("NGridTriangle",     TriangleGrid),
+        DIRECT_RECIPE("NRandomSource",     RandomSource)
         
     );
 }

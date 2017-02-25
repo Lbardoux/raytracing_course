@@ -7,12 +7,11 @@
         NFibonacci        -- exo 5
         NGridTriangle     -- exo 5
         NRandomSource     -- exo 6
-        
         -->
-        <enumMethod>NGridTriangle</enumMethod>
-        <N>64</N>
-        <!-- 0.1 pour cornell, -->
-        <normalTweak_f>0.1</normalTweak_f>
+        <enumMethod>NRandomSource</enumMethod>
+        <N>128</N>
+        <!-- [0.01, 0.1] pour cornell.obj, -->
+        <normalTweak_f>0.01</normalTweak_f>
     </direct>
     <indirect enable="false">
         <!--
@@ -23,6 +22,6 @@
         <N>64</N>
     </indirect>
     <emited enable="true" />
-    <phongInterpolation>0.7</phongInterpolation> <!-- compris entre 0.0 et 1.0 -->
+    <phongInterpolation>0.9</phongInterpolation> <!-- compris entre 0.0 et 1.0 -->
     <randomSeed time="false">25</randomSeed>
 </raytracing>
