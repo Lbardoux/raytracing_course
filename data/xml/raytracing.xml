@@ -11,6 +11,7 @@
         -->
         <enumMethod>NGridTriangle</enumMethod>
         <N>64</N>
+        <!-- 0.1 pour cornell, -->
         <normalTweak_f>0.1</normalTweak_f>
     </direct>
     <indirect enable="false">
