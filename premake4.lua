@@ -3,7 +3,7 @@ solution "gKit2light"
 
 	platforms { "x64", "x32" }
 	
-	includedirs { ".", "src/gKit", "src/XMLLoader" }
+	includedirs { ".", "src/gKit", "src/XMLLoader", "src/structures", "src/core" }
 	
 	gkit_dir = path.getabsolute(".")
 	
@@ -103,7 +103,7 @@ for i, name in ipairs(projects) do
 		targetdir "bin"
 		files ( gkit_files )
 		files ( "src/XMLLoader/*.cpp")
-		files ( "src/core/*.hpp")
+		files ( "src/core/*.cpp", "src/core/*.hpp")
 		files ( "src/structures/*.hpp")
 		files ( "src/templates/*.hpp")
 		files ( "src/*.cpp")
