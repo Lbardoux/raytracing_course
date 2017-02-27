@@ -135,7 +135,6 @@ namespace
                 }
             }
         });
-        
         return result/static_cast<float>(Scene::sources.size()*N);
     }
     /**
@@ -176,7 +175,6 @@ namespace
                 }
             }
         });
-        
         return result/static_cast<float>(nbPoint);
     }
 }
@@ -247,28 +245,36 @@ Color RandomSource::compute(const Point& observer, const Hit& impact, int N)
     std::mt19937       mt(rd());
     std::uniform_int_distribution<int>    dist(0, Scene::sources.size()-1);
     std::uniform_real_distribution<float> distreal(0.0f, 1.0f);
+    float p1_x = MIS_strategy_1();
     for(int i=0;i<N;++i)
     {
-        Source& src = Scene::sources.at(dist(mt));
-        /*const float x = distreal(mt);
-        const float y = distreal(mt);
-        const float sqrtu   = std::sqrt(x);
-        const float alpha   = (1.0f - y)*sqrtu;
-        const float beta    = y*sqrtu;*/
-        Vector normal;// = src.normal(alpha, beta);
-        //Point e = shift(src.point(alpha, beta), normal);
+        #if RANDOM
+            Source& src = Scene::sources.at(dist(mt));
+        #else // on choisit la plus proche du point o.
+            Source* choosen = nullptr;
+            int mindistance = 2500;
+            for(int k=0;k<Scene::sources.size();++k)
+            {
+                int compute = distance(Scene::sources.at(k).point(0.33f, 0.33f), o);
+                if (compute < mindistance)
+                {
+                    choosen = &Scene::sources.at(k);
+                    mindistance = compute;
+                }
+            }
+            Source& src = *choosen;
+        #endif
+        Vector normal;
         Point e = pointOnSource(src, distreal(mt), distreal(mt), normal);
         Ray ray(o, e);
         if (!Scene::intersect(ray, hit))
         {
             FromG_t G;
             float cosThetaP;
-            result = result + computeL1(impact, observer, o, e, normal, G, cosThetaP);
-            /*BlinnPhongWrapper wrap = {&impact, &Scene::mesh, &observer, &e};
-            Color brdf     = BlinnPhong(wrap, RaytracingXml::interpolation);
-            float cosThetaP = std::cos(dot(normalize(Vector(o, e)), normalize(normal)));
-            FromG_t G = computeG(o, impact.n, e, normal, cosThetaP);
-            result = result + (G.at(0)*brdf*cosThetaP);*/
+            Color L1 = computeL1(impact, observer, o, e, normal, G, cosThetaP);
+            float p2_y = MIS_strategy_2(cosThetaP, G.at(1), G.at(2));
+            result = result + L1;
+            
         }
     }
     return result/static_cast<float>(N);

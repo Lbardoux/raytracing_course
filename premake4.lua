@@ -92,7 +92,6 @@ if no_project then
 end
  -- description des projets		 
 projects = {
-	"shader_kit",
 	"RayTracing"
 }
 

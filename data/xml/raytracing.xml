@@ -9,7 +9,7 @@
         NRandomSource     -- exo 6
         -->
         <enumMethod>NRandomSource</enumMethod>
-        <N>128</N>
+        <N>131</N>
         <!-- [0.01, 0.1] pour cornell.obj, -->
         <normalTweak_f>0.01</normalTweak_f>
     </direct>
