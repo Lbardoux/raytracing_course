@@ -9,18 +9,25 @@
 
 #include <vector>
 #include <cstdint>
-#include "Triangle.hpp"
-#include "Scene.hpp"
+#include <string>
+#include "core/gkit_core.hpp"
+#include "core/ray_core.hpp"
 
 typedef uint32_t triangle_ind_t;
 typedef int32_t  node_ind_t;
-typedef u_char   axes_t;
 
 class BoundingBox final
 {
     public:
-        float pmin[3]; //!< Le point minimale 
-        float pmax[3]; //!< Le point œ
+        vec3 pmin; //!< Le point minimale.
+        vec3 pmax; //!< Le point maximale.
+        
+        /**
+         * @brief Vérifie si @b ray intersecte la boite englobante.
+         * @param[in] ray Le rayon avec lequel tester.
+         * @return true si @b ray intersecte la boite, false sinon.
+         */
+        bool intersect(const Ray& ray) const noexcept;
 };
 
 /**
@@ -37,12 +44,21 @@ class BinaryTree final
         class Node final
         {
             public:
-                Node() : right(-1), left(-1), triangle(0) {}
+                Node(const node_ind_t r=-1, const node_ind_t l=-1, const triangle_ind_t t=0);
                 /**
-                 * @brief      Indique si un Node est une feuille
-                 * @return     Vrai si le Node est une feuille, Faux sinon
+                 * @brief Indique si un Node est une feuille
+                 * @return Vrai si le Node est une feuille, Faux sinon
                  */
-                // bool feuille() { return right == -1 && left == -1; }
+                bool isLeaf(void) const
+                {
+                    return right == -1 && left == -1;
+                }
+                /**
+                 * @brief Crée une feuille embarquant le triangle numéro @b triangleOffset.
+                 * @param[in] triangleOffset L'indice du triangle que cette feuille référence.
+                 * @return Le Node nouvellement créé, pour etre copié.
+                 */
+                static Node make_leaf(const triangle_ind_t triangleOffset) noexcept;
 
                 BoundingBox    bbox;     //!< La boite englobante pour ce noeud.
                 node_ind_t     right;    //!< L'offset du fils droit,  -1 --> feuille.
@@ -51,58 +67,19 @@ class BinaryTree final
         };
 
         /**
-         * @brief      Initialisation de l'arbre en fonction de la scene
-         * @param[in]  scene  La scene
+         * @brief Initialisation de l'arbre en fonction de la scene
          */
-        void init(const Scene& scene);
-
+        void init(const std::string& fname);
         node_ind_t build_node(const triangle_ind_t begin, const triangle_ind_t end);
+        bool intersect(const Ray& ray, Hit& hit) const;
+        bool fromFile(const std::string& fname);
+        void dump(const std::string& fname);
         
         
         std::vector<Triangle>*        triangles; //!< L'ensemble des triangles dans la structure.
-        std::vector<BinaryTree::Node> nodes;     //!< L'ensemble des éléments  de l'arbre.
+        std::vector<BinaryTree::Node> nodes;     //!< L'ensemble des éléments de l'arbre.
         triangle_ind_t                root;      //!< Indice du noeud racine
-
-    private:
-        /**
-         * @brief      Fonction qui construit la boite englobant les triangles
-         *             contenu entre begin et end
-         * @param[in]  begin  Indice de début des triangles à englober
-         * @param[in]  end    Indice de fin des triangles à englober
-         * @param      bbox   La boite englobant les points
-         */
-        void findBox(const triangle_ind_t begin, const triangle_ind_t end, BoundingBox& bbox);
-
-        /**
-         * @brief      Fonction qui cherche l'axe le plus long d'une Boite
-         *             englobante
-         * @param[in]  bbox  Boite englobante sur laquelle on recherche l'axe
-         * @return     Axe qui est le plus long
-         */
-        axes_t largerAxe(const BoundingBox& bbox);
-};
-
-
-struct predicat
-{
-    axes_t axe;
-    float coupe;
-
-    predicat( const axes_t _axe, const float _coupe ) : axe(_axe), coupe(_coupe) {}
-    bool operator() ( const Triangle& t ) const
-    {
-        const float * triangle = static_cast<const float*>(&t.a.x);
-        float coord = 0.0f;
-        
-        for(int i = 0; i < 3; ++i)
-        {
-            coord += triangle[(i * 3) + this->axe];
-        }
-        
-        coord /= 3.0f;
-        
-        return coord < this->coupe;
-    }
+    
 };
 
 #endif

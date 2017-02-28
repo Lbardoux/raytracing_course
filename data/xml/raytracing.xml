@@ -8,8 +8,8 @@
         NGridTriangle     -- exo 5
         NRandomSource     -- exo 6
         -->
-        <enumMethod>NRandomSource</enumMethod>
-        <N>131</N>
+        <enumMethod>NGridTriangle</enumMethod>
+        <N>512</N>
         <!-- [0.01, 0.1] pour cornell.obj, -->
         <normalTweak_f>0.01</normalTweak_f>
     </direct>

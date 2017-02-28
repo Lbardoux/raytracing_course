@@ -1,7 +1,7 @@
 #include "time_core.hpp"
 #include <thread>
 
-/* Function that retu */
+
 void get_time(struct timespec * ts)
 {
     clock_gettime(CLOCK_MONOTONIC, ts);
@@ -9,23 +9,20 @@ void get_time(struct timespec * ts)
 
 void timespecDiff(struct timespec *a, struct timespec *b, struct timespec *res)
 {
-    /* a <= b? */
-    if ((a->tv_sec < b->tv_sec) ||
-            ((a->tv_sec == b->tv_sec) && (a->tv_nsec <= b->tv_nsec)))
+    if ((a->tv_sec < b->tv_sec) || ((a->tv_sec == b->tv_sec) && (a->tv_nsec <= b->tv_nsec)))
     {
-        res->tv_sec = res->tv_nsec = 0 ;
+        res->tv_sec = res->tv_nsec = 0;
     }
-    /* a > b */
     else
     {
-        res->tv_sec = a->tv_sec - b->tv_sec ;
+        res->tv_sec = a->tv_sec - b->tv_sec;
         if (a->tv_nsec < b->tv_nsec)
         {
-            res->tv_nsec = a->tv_nsec + 1000000000L - b->tv_nsec ;
-            res->tv_sec-- ;             /* Borrow a second. */
+            res->tv_nsec = a->tv_nsec + 1000000000L - b->tv_nsec;
+            res->tv_sec--;
         }
         else
-            res->tv_nsec = a->tv_nsec - b->tv_nsec ;
+            res->tv_nsec = a->tv_nsec - b->tv_nsec;
     }
 }
 
@@ -67,9 +64,9 @@ void timeBeginFunc(const std::string& func_name)
 {
     std::cout << "Début de la fonction : " << func_name << std::endl;
     funcName = func_name;
-    canPrintRendering = true;
-
-    rendering = std::thread(printRendering);
+    // canPrintRendering = true;
+    // je met ça en commentaire, ça fait crasher chez moi
+    //rendering = std::thread(printRendering);
 
     get_time(&timeStart);
 }

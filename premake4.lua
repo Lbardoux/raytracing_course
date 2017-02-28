@@ -102,7 +102,7 @@ for i, name in ipairs(projects) do
 		targetdir "bin"
 		files ( gkit_files )
 		files ( "src/XMLLoader/*.cpp")
-		files ( "src/core/*.cpp", "src/core/*.hpp")
+		files ( "src/core/*.cpp")
 		files ( "src/structures/*.hpp")
 		files ( "src/templates/*.hpp")
 		files ( "src/*.cpp")

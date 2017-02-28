@@ -253,7 +253,7 @@ Color RandomSource::compute(const Point& observer, const Hit& impact, int N)
         #else // on choisit la plus proche du point o.
             Source* choosen = nullptr;
             int mindistance = 2500;
-            for(int k=0;k<Scene::sources.size();++k)
+            for(unsigned int k=0;k<Scene::sources.size();++k)
             {
                 int compute = distance(Scene::sources.at(k).point(0.33f, 0.33f), o);
                 if (compute < mindistance)

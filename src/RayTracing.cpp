@@ -1,9 +1,9 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "gkit_core.hpp"
-#include "ray_core.hpp"
-#include "time_core.hpp"
+#include "core/gkit_core.hpp"
+#include "core/ray_core.hpp"
+#include "core/time_core.hpp"
 #include "ConfigLoaders.hpp"
 #include "Direct.hpp"
 #include "tonemapper.hpp"
@@ -77,7 +77,7 @@ int main(UNUSED(int argc), UNUSED(char** argv))
     Vector dx0, dy0;
     createNearPoint(image, o, d0, dx0, dy0);
     
-    timeBeginFunc("Programme principal");
+    timeBeginFunc("Debut du raytracing");
     #pragma omp parallel for schedule(dynamic, 16) firstprivate(o, d0, dx0, dy0)
     for(int y=0;y<image.height();++y)
     {
